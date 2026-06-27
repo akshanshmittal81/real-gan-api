@@ -11,25 +11,22 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ─── Model Loading ────────────────────────────────────────────────────────────
 pipe = None
 
 def load_model():
     global pipe
     try:
         from transformers import pipeline
-        # ViT fine-tuned specifically for GAN / Deepfake detection
-        # Model card: https://huggingface.co/Wvolf/ViT-L-16-for-GAN-and-Deepfake-Detection
+        # Public, verified working deepfake detection model
         pipe = pipeline(
             "image-classification",
-            model="Wvolf/ViT-L-16-for-GAN-and-Deepfake-Detection",
-            device=-1  # CPU (Render free tier has no GPU)
+            model="prithivMLmods/Deep-Fake-Detector-Model",
+            device=-1
         )
         logger.info("✅ GAN Detection model loaded successfully")
     except Exception as e:
         logger.error(f"❌ Model load failed: {e}")
         pipe = None
-
 
 def detect_gan(image_base64: str):
     img_bytes = base64.b64decode(image_base64)
@@ -39,28 +36,21 @@ def detect_gan(image_base64: str):
         return {"error": "Model not loaded"}, 503
 
     results = pipe(img)
-    # Results are like: [{"label": "fake", "score": 0.92}, {"label": "real", "score": 0.08}]
+    # Returns: [{"label": "Fake", "score": 0.92}, {"label": "Real", "score": 0.08}]
     top = results[0]
     label = top["label"].lower()
     score = round(top["score"], 2)
+    is_fake = "fake" in label
 
-    is_fake = "fake" in label or "gan" in label or "artificial" in label
-
-    return {
-        "is_fake": is_fake,
-        "confidence": score
-    }, 200
-
-
-# ─── Routes ──────────────────────────────────────────────────────────────────
+    return {"is_fake": is_fake, "confidence": score}, 200
 
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({
         "status": "ok",
         "service": "GAN & Deepfake Detection API",
-        "model": "Wvolf/ViT-L-16-for-GAN-and-Deepfake-Detection",
-        "version": "2.0.0"
+        "model": "prithivMLmods/Deep-Fake-Detector-Model",
+        "version": "3.0.0"
     })
 
 @app.route("/health", methods=["GET"])
@@ -73,7 +63,6 @@ def predict():
         data = request.get_json()
         if not data or "image_base64" not in data:
             return jsonify({"error": "Missing field: image_base64"}), 400
-
         try:
             img_bytes = base64.b64decode(data["image_base64"])
             if len(img_bytes) < 100:
@@ -83,16 +72,13 @@ def predict():
 
         result, status = detect_gan(data["image_base64"])
         return jsonify(result), status
-
     except Exception as e:
         logger.error(f"Predict error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-# ─── Startup ─────────────────────────────────────────────────────────────────
 with app.app_context():
     load_model()
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5001))
+    port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port, debug=False)
